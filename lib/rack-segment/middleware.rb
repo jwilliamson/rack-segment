@@ -42,7 +42,8 @@ module RackSegment
     private
     def write_headers(identifier, env, experiment)
       begin
-        unique = Digest::SHA1.hexdigest(experiment.name + identifier).to_i(0x10)
+        experiment_unique = Digest::SHA1.hexdigest(experiment.name).to_i(0x10)
+        unique = experiment_unique + Digest::SHA1.hexdigest(identifier).to_i(0x10)
         env[HTTP_HEADER_PREFIX + experiment.name.upcase] = number_to_bucket(unique % experiment.bucket_count)
       rescue NoCookieError => e
         @log.info "No Cookie found called #{cookie_name}"
