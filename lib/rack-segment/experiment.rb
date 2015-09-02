@@ -1,10 +1,11 @@
 module RackSegment
   class Experiment
-    attr_reader :name
+    attr_reader :name, :traffic
 
-    def initialize(name, buckets)
+    def initialize(name, buckets, traffic)
       @name = name
       @buckets = buckets.reduce({}) { |all, bucket| all[bucket.name] = bucket; all }
+      @traffic = traffic
     end
 
     def bucket_count
@@ -12,7 +13,9 @@ module RackSegment
     end
 
     def bucket(request)
-      bucket = @buckets[(request.headers[Middleware::HTTP_HEADER_PREFIX + name.upcase] || 'a').to_sym]
+      bucket_name = (request.headers[Middleware::HTTP_HEADER_PREFIX + name.upcase] || 'a').to_sym
+      bucket_name = :a if bucket_name == :excluded
+      bucket = @buckets[bucket_name]
       raise BucketNotFoundError.new(@bucket) unless bucket
       bucket.try(:call) || bucket
     end

@@ -42,15 +42,27 @@ module RackSegment
     private
     def write_headers(identifier, env, experiment)
       begin
-        experiment_unique = Digest::SHA1.hexdigest(experiment.name).to_i(0x10)
-        unique = experiment_unique + Digest::SHA1.hexdigest(identifier).to_i(0x10)
-        env[HTTP_HEADER_PREFIX + experiment.name.upcase] = number_to_bucket(unique % experiment.bucket_count)
+        unique = create_unique(identifier, experiment.name)
+
+        if in_experiment?(unique, experiment.traffic)
+          env[HTTP_HEADER_PREFIX + experiment.name.upcase] = number_to_bucket(unique % experiment.bucket_count)
+        else
+          env[HTTP_HEADER_PREFIX + experiment.name.upcase] = 'excluded'
+        end
       rescue NoCookieError => e
         @log.info "No Cookie found called #{cookie_name}"
       rescue StandardError => e
         @log.info "Error when extracting identifier"
         raise e unless debug_mode?
       end
+    end
+
+    def create_unique(experiment_name, identifier)
+      Digest::SHA1.hexdigest(experiment_name).to_i(0x10) + Digest::SHA1.hexdigest(identifier).to_i(0x10)
+    end
+
+    def in_experiment?(unique, traffic_percentage)
+       ((unique % 100) / 100) <= traffic_percentage
     end
 
     def debug_mode?

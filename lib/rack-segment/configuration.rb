@@ -6,10 +6,10 @@ module RackSegment
       @experiments = []
     end
 
-    def experiment(name, &block)
+    def experiment(name, traffic = 1, &block)
       builder = ExperimentBuilder.new
       builder.instance_eval &block
-      @experiments << Experiment.new(name, builder.buckets)
+      @experiments << Experiment.new(name, builder.buckets, traffic)
     end
   end
 
