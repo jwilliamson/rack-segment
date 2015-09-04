@@ -1,6 +1,7 @@
 module RackSegment
   class Middleware
     HTTP_HEADER_PREFIX = 'HTTP_EXPERIMENT_'
+    RACK_SEGMENT_COOKIE = 'rack-segment'
 
     DEFAULT_OPTS = {
       :identifier => :rack_session
@@ -30,27 +31,77 @@ module RackSegment
     end
 
     def call(env)
-      identifier = retrieve_id(env)
-      experiments.each { |e| write_headers identifier, env, e }
+      req = Rack::Request.new(env)
+      
+      identifier = retrieve_id(req)
+      e_override, b_override = retrieve_overrides(req)
+
+      experiment_headers = {}
+
+      experiments.each do |e|
+        unless bucket = override_values(e, e_override, b_override)
+          bucket = retrieve_bucket(identifier, e)
+        end
+        experiment_headers[HTTP_HEADER_PREFIX + e.name.upcase] = bucket
+      end
+
+      experiment_headers.each { |header,bucket| env[header] = bucket }
 
       status, headers, body = @app.call(env)
+      res = Rack::Response.new body, status, headers
+
       debug_info(env, headers) if debug_mode?
 
-      [status, headers, body]
+      store_over_in_cookie!(req, res)
+
+      res.finish
     end
 
     private
-    def write_headers(identifier, env, experiment)
-      begin
-        unique = create_unique(identifier, experiment.name)
+    def store_over_in_cookie!(req, res)
+      params = Rack::Utils.parse_nested_query(req.query_string)
+      if params['segment']
+        res.set_cookie(RACK_SEGMENT_COOKIE, :value => params['segment'], :path => "/")
+      end
+    end
 
+    def override_values(experiment, e_override, b_override)
+      if (e_override || '').downcase == experiment.name && b_override
+        b_override
+      elsif e_override.nil? && b_override
+        b_override
+      else
+        nil
+      end
+    end
+
+    def retrieve_overrides(req)
+      params = Rack::Utils.parse_nested_query(req.query_string)
+      experiment, bucket = (params['segment'] || '').split('|')
+
+      unless experiment || bucket
+        experiment, bucket = (req.cookies[RACK_SEGMENT_COOKIE] || '').split('|')
+      end
+
+      unless bucket
+        bucket = experiment
+        experiment = nil
+      end
+      [experiment, bucket]
+    end
+
+    def retrieve_bucket(identifier, experiment)
+      unique = create_unique(identifier, experiment.name)
+
+      begin
         if in_experiment?(unique, experiment.traffic)
-          env[HTTP_HEADER_PREFIX + experiment.name.upcase] = number_to_bucket(unique % experiment.bucket_count)
+          number_to_bucket(unique % experiment.bucket_count)
         else
-          env[HTTP_HEADER_PREFIX + experiment.name.upcase] = 'excluded'
+          'excluded'
         end
       rescue NoCookieError => e
         @log.info "No Cookie found called #{cookie_name}"
+        raise e unless debug_mode?
       rescue StandardError => e
         @log.info "Error when extracting identifier"
         raise e unless debug_mode?
@@ -79,27 +130,25 @@ module RackSegment
       Experiment.list
     end
 
-    def retrieve_id(env)
+    def retrieve_id(req)
       case
-        when identifier.respond_to?(:call)           then identifier.call(env)
-        when identifier == :rack_session             then rack_session(env)
-        when identifier == :cookie                   then cookie(env)
+        when identifier.respond_to?(:call)           then identifier.call(req.env)
+        when identifier == :rack_session             then rack_session(req)
+        when identifier == :cookie                   then cookie(req)
         else raise "Unsupported identifier attribute: #{attr}"
       end
     end
 
-    def cookie(env)
-      request = Rack::Request.new env
+    def cookie(req)
       unless value = request.cookies[cookie_name]
         raise NoCookieError.new cookie_name
       end
       value
     end
 
-    def rack_session(env)
-      request = Rack::Request.new env
-      request.session[:init] = true
-      request.session.id
+    def rack_session(req)
+      req.session[:init] = true
+      req.session.id
     end
 
     def number_to_bucket(number)
