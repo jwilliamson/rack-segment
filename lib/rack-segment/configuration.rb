@@ -21,7 +21,8 @@ module RackSegment
     end
 
     def variant(name, obj = nil, &block)
-      @buckets << Bucket.new(name, obj || block)
+      value = obj.nil? ? block : obj
+      @buckets << Bucket.new(name, value)
     end
   end
 end

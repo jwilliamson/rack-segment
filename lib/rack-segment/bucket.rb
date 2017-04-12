@@ -8,7 +8,8 @@ module RackSegment
     end
 
     def value
-      @str_block.try(:call) || @str_block.to_s
+      return nil if @str_block.nil?
+      @str_block.try(:call) || @str_block
     end
   end
 end
